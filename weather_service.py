@@ -5,7 +5,7 @@ Uses Open-Meteo API (free, no API key needed)
 import os
 import requests
 from datetime import datetime, timedelta
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, HTTPException
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -19,8 +19,8 @@ CACHE_TTL = int(os.getenv("CACHE_TTL", "1800"))  # 30 minutes
 # Simple in-memory cache
 _cache = {}
 
-# Create FastAPI app
-app = FastAPI(title="Weather Service")
+# Create router (can be included in main app)
+router = APIRouter(prefix="/weather", tags=["weather"])
 
 # Weather code descriptions (WMO Weather interpretation codes)
 WEATHER_CODES = {
@@ -115,18 +115,18 @@ def format_weather_description(weather_data):
     )
 
 
-@app.get("/")
+@router.get("/")
 def root():
     """Service information"""
     return {
         "service": "weather",
         "status": "running",
         "provider": "Open-Meteo (free, no API key needed)",
-        "endpoints": ["/health", "/weather"]
+        "endpoints": ["/health", "/"]
     }
 
 
-@app.get("/health")
+@router.get("/health")
 def health():
     """Health check endpoint"""
     return {
@@ -136,7 +136,7 @@ def health():
     }
 
 
-@app.get("/weather")
+@router.get("/")
 def weather(location: str = None):
     """
     Get current weather for a location.
@@ -194,7 +194,12 @@ def weather(location: str = None):
 
 
 if __name__ == "__main__":
+    # For standalone running, create a FastAPI app
+    from fastapi import FastAPI
     import uvicorn
+    
+    app = FastAPI(title="Weather Service")
+    app.include_router(router)
     
     print("=" * 60)
     print("🌤️  IBM Ghost - Weather Service")
