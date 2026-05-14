@@ -1,0 +1,19 @@
+# Core dependencies for IBM Ghost services
+
+# Web framework for REST APIs
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# Environment variables
+python-dotenv==1.0.0
+
+# HTTP requests (for Weather and Spotify services)
+requests==2.31.0
+
+# Google Calendar API (for Calendar service)
+google-auth-oauthlib==1.1.0
+google-auth-httplib2==0.1.1
+google-api-python-client==2.108.0
+
+# Note: IMAP email service uses Python's built-in imaplib (no extra packages needed)
+# Note: Spotify service uses requests (already included above)
