@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Sentinel - Carer Dashboard</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <span class="logo">👻</span>
+                <h1>The Sentinel</h1>
+            </div>
+            <div class="nav-status">
+                <span class="status-indicator" id="connectionStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Connecting...</span>
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Container -->
+    <div class="container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <ul class="nav-menu">
+                <li class="nav-item active" data-page="dashboard">
+                    <span class="nav-icon">📊</span>
+                    <span class="nav-label">Dashboard</span>
+                </li>
+                <li class="nav-item" data-page="alerts">
+                    <span class="nav-icon">🔔</span>
+                    <span class="nav-label">Alerts</span>
+                    <span class="badge" id="alertBadge">0</span>
+                </li>
+                <li class="nav-item" data-page="timeline">
+                    <span class="nav-icon">📅</span>
+                    <span class="nav-label">Timeline</span>
+                </li>
+                <li class="nav-item" data-page="settings">
+                    <span class="nav-icon">⚙️</span>
+                    <span class="nav-label">Settings</span>
+                </li>
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Dashboard Page -->
+            <div class="page active" id="dashboard">
+                <div class="page-header">
+                    <h2>Dashboard</h2>
+                    <p class="subtitle">Overview of wellbeing monitoring</p>
+                </div>
+
+                <!-- Stats Cards -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">✅</div>
+                        <div class="stat-content">
+                            <h3 id="activitiesToday">0</h3>
+                            <p>Activities Today</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">⚠️</div>
+                        <div class="stat-content">
+                            <h3 id="activeAlerts">0</h3>
+                            <p>Active Alerts</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">📈</div>
+                        <div class="stat-content">
+                            <h3 id="routineScore">--</h3>
+                            <p>Routine Score</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🕐</div>
+                        <div class="stat-content">
+                            <h3 id="lastActivity">--</h3>
+                            <p>Last Activity</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Alerts -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Recent Alerts</h3>
+                        <button class="btn-link" onclick="navigateTo('alerts')">View All</button>
+                    </div>
+                    <div class="card-body">
+                        <div id="recentAlerts" class="alerts-list">
+                            <div class="empty-state">
+                                <span class="empty-icon">🎉</span>
+                                <p>No alerts - everything looks good!</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Today's Activities -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Today's Activities</h3>
+                    </div>
+                    <div class="card-body">
+                        <div id="todayActivities" class="activity-list">
+                            <div class="loading">Loading activities...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Alerts Page -->
+            <div class="page" id="alerts">
+                <div class="page-header">
+                    <h2>Alerts</h2>
+                    <p class="subtitle">Anomaly notifications and warnings</p>
+                </div>
+
+                <div class="card">
+                    <div class="card-body">
+                        <div id="allAlerts" class="alerts-list">
+                            <div class="loading">Loading alerts...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Timeline Page -->
+            <div class="page" id="timeline">
+                <div class="page-header">
+                    <h2>Activity Timeline</h2>
+                    <p class="subtitle">Complete history of activities</p>
+                </div>
+
+                <!-- Date Filter -->
+                <div class="card">
+                    <div class="card-body">
+                        <div class="filter-bar">
+                            <label for="dateFilter">Filter by date:</label>
+                            <input type="date" id="dateFilter" class="input">
+                            <button class="btn btn-secondary" onclick="loadTimeline()">Apply</button>
+                            <button class="btn btn-link" onclick="clearDateFilter()">Clear</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Timeline -->
+                <div class="card">
+                    <div class="card-body">
+                        <div id="timelineContent" class="timeline">
+                            <div class="loading">Loading timeline...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Page -->
+            <div class="page" id="settings">
+                <div class="page-header">
+                    <h2>Settings</h2>
+                    <p class="subtitle">Configure your Sentinel device</p>
+                </div>
+
+                <!-- Connection Settings -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Device Connection</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label for="apiEndpoint">Raspberry Pi API Endpoint</label>
+                            <input type="text" id="apiEndpoint" class="input" placeholder="http://192.168.1.100:5000">
+                            <small>Enter the IP address of your Sentinel device</small>
+                        </div>
+                        <button class="btn btn-primary" onclick="saveSettings()">Save Connection</button>
+                        <button class="btn btn-secondary" onclick="testConnection()">Test Connection</button>
+                    </div>
+                </div>
+
+                <!-- Alert Settings -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Alert Preferences</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="enableNotifications" checked>
+                                <span>Enable browser notifications</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="refreshInterval">Refresh Interval (seconds)</label>
+                            <input type="number" id="refreshInterval" class="input" value="30" min="10" max="300">
+                            <small>How often to check for new alerts</small>
+                        </div>
+                        <button class="btn btn-primary" onclick="saveSettings()">Save Preferences</button>
+                    </div>
+                </div>
+
+                <!-- About -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>About</h3>
+                    </div>
+                    <div class="card-body">
+                        <p><strong>The Sentinel</strong> - Passive Wellbeing Monitoring</p>
+                        <p>Version 1.0.0</p>
+                        <p>Built with ❤️ for elderly care</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Alert Modal -->
+    <div class="modal" id="alertModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">Alert Details</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Alert details will be inserted here -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+                <button class="btn btn-danger" onclick="acknowledgeAlert()">Acknowledge</button>
+                <button class="btn btn-primary" onclick="contactEmergency()">Contact Emergency</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/api.js"></script>
+    <script src="js/notifications.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
