@@ -7,26 +7,26 @@ let currentPage = 'dashboard';
 let refreshInterval = null;
 let currentAlert = null;
 
-// Activity icons mapping
-const activityIcons = {
-    'wake up': '🌅',
-    'breakfast': '🍳',
-    'medication': '💊',
-    'walk': '🚶',
-    'lunch': '🍽️',
-    'dinner': '🍲',
-    'bedtime': '🌙',
-    'chess': '♟️',
-    'read': '📖',
-    'call': '📞',
-    'exercise': '🏃',
-    'rest': '😴',
-    'social': '👥',
-    'cognitive': '🧠',
-    'health': '❤️',
-    'meal': '🍴',
-    'other': '📋',
+// Activity category colors and icons
+const activityCategories = {
+    'meal': { color: '#f59e0b', icon: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z' },
+    'health': { color: '#ef4444', icon: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z' },
+    'exercise': { color: '#10b981', icon: 'M13.49 5.48c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm-3.6 13.9l1-4.4 2.1 2v6h2v-7.5l-2.1-2 .6-3c1.3 1.5 3.3 2.5 5.5 2.5v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.1l-5.2 2.2v4.7h2v-3.4l1.8-.7-1.6 8.1-4.9-1-.4 2 7 1.4z' },
+    'rest': { color: '#6366f1', icon: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z' },
+    'social': { color: '#8b5cf6', icon: 'M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z' },
+    'cognitive': { color: '#3b82f6', icon: 'M9 11.75c-.69 0-1.25.56-1.25 1.25s.56 1.25 1.25 1.25 1.25-.56 1.25-1.25-.56-1.25-1.25-1.25zm6 0c-.69 0-1.25.56-1.25 1.25s.56 1.25 1.25 1.25 1.25-.56 1.25-1.25-.56-1.25-1.25-1.25zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8 0-.29.02-.58.05-.86 2.36-1.05 4.23-2.98 5.21-5.37C11.07 8.33 14.05 10 17.42 10c.78 0 1.53-.09 2.25-.26.21.71.33 1.47.33 2.26 0 4.41-3.59 8-8 8z' },
+    'other': { color: '#64748b', icon: 'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z' }
 };
+
+// Get activity icon HTML
+function getActivityIcon(category) {
+    const cat = activityCategories[category] || activityCategories['other'];
+    return `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="${cat.color}">
+            <path d="${cat.icon}"/>
+        </svg>
+    `;
+}
 
 /**
  * Initialize the application
@@ -179,6 +179,14 @@ function updateStatistics(stats) {
     document.getElementById('activeAlerts').textContent = stats.active_alerts || 0;
     document.getElementById('routineScore').textContent = stats.routine_score ? `${stats.routine_score}%` : '--';
     document.getElementById('lastActivity').textContent = stats.last_activity || '--';
+    
+    // Update last activity name
+    const lastActivityNameEl = document.getElementById('lastActivityName');
+    if (lastActivityNameEl) {
+        lastActivityNameEl.textContent = stats.last_activity_name
+            ? stats.last_activity_name.charAt(0).toUpperCase() + stats.last_activity_name.slice(1)
+            : 'No recent activity';
+    }
 }
 
 /**
@@ -190,7 +198,10 @@ function updateRecentAlerts(alerts) {
     if (!alerts || alerts.length === 0) {
         container.innerHTML = `
             <div class="empty-state">
-                <span class="empty-icon">🎉</span>
+                <svg class="empty-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                </svg>
                 <p>No alerts - everything looks good!</p>
             </div>
         `;
@@ -209,7 +220,12 @@ function updateTodayActivities(activities) {
     if (!activities || activities.length === 0) {
         container.innerHTML = `
             <div class="empty-state">
-                <span class="empty-icon">📅</span>
+                <svg class="empty-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
                 <p>No activities logged today</p>
             </div>
         `;
@@ -230,7 +246,7 @@ function createAlertHTML(alert) {
     return `
         <div class="alert-item ${severityClass} ${resolvedClass}" onclick="showAlertModal(${JSON.stringify(alert).replace(/"/g, '"')})">
             <div class="alert-header">
-                <span class="alert-title">${alert.activity}</span>
+                <span class="alert-title">${alert.activity.charAt(0).toUpperCase() + alert.activity.slice(1)}</span>
                 <span class="alert-time">${timeAgo}</span>
             </div>
             <p class="alert-message">${alert.message}</p>
@@ -242,18 +258,18 @@ function createAlertHTML(alert) {
  * Create HTML for an activity item
  */
 function createActivityHTML(activity) {
-    const icon = activityIcons[activity.name] || activityIcons[activity.category] || activityIcons['other'];
+    const iconHTML = getActivityIcon(activity.category);
     const statusClass = activity.status || 'pending';
-    const statusText = activity.status === 'completed' ? 'Completed' : 
+    const statusText = activity.status === 'completed' ? 'Completed' :
                       activity.status === 'missed' ? 'Missed' : 'Pending';
 
     return `
         <div class="activity-item">
-            <div class="activity-icon">${icon}</div>
+            <div class="activity-icon">${iconHTML}</div>
             <div class="activity-details">
-                <div class="activity-name">${activity.name}</div>
+                <div class="activity-name">${activity.name.charAt(0).toUpperCase() + activity.name.slice(1)}</div>
                 <div class="activity-time">
-                    Expected: ${activity.expected_time || '--'} 
+                    Expected: ${activity.expected_time || '--'}
                     ${activity.time ? `| Actual: ${activity.time}` : ''}
                 </div>
             </div>
@@ -551,6 +567,37 @@ function showError(message) {
  * Set up event listeners
  */
 function setupEventListeners() {
+    // Mobile menu toggle
+    const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+    const sidebar = document.querySelector('.sidebar');
+    const sidebarOverlay = document.getElementById('sidebarOverlay');
+    
+    if (mobileMenuBtn) {
+        mobileMenuBtn.addEventListener('click', () => {
+            sidebar.classList.toggle('active');
+            sidebarOverlay.classList.toggle('active');
+        });
+    }
+    
+    // Close sidebar when overlay is clicked
+    if (sidebarOverlay) {
+        sidebarOverlay.addEventListener('click', () => {
+            sidebar.classList.remove('active');
+            sidebarOverlay.classList.remove('active');
+        });
+    }
+    
+    // Close sidebar when nav item is clicked on mobile
+    const navItems = document.querySelectorAll('.nav-item');
+    navItems.forEach(item => {
+        item.addEventListener('click', () => {
+            if (window.innerWidth <= 768) {
+                sidebar.classList.remove('active');
+                sidebarOverlay.classList.remove('active');
+            }
+        });
+    });
+
     // Close modal on background click
     document.getElementById('alertModal').addEventListener('click', (e) => {
         if (e.target.id === 'alertModal') {
@@ -558,10 +605,12 @@ function setupEventListeners() {
         }
     });
 
-    // Handle ESC key to close modal
+    // Handle ESC key to close modal and sidebar
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             closeModal();
+            sidebar.classList.remove('active');
+            sidebarOverlay.classList.remove('active');
         }
     });
 }

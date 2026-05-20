@@ -4,14 +4,50 @@ Get The Sentinel Carer Dashboard up and running in 5 minutes!
 
 ## 🚀 Quick Start
 
-### Step 1: Install Dependencies
+### 🎯 Option A: View Web App Only (No Setup Required!)
+
+**Just want to see the interface?** Open the web app directly in your browser:
+
+1. Navigate to the `web-app` folder in your file explorer
+2. Double-click `index.html` to open it in your browser
+3. The app will automatically use **mock data** - no backend needed!
+
+**What you'll see with mock data:**
+- ✅ Dashboard with sample statistics
+- ✅ Sample alerts (missed medication, delayed breakfast)
+- ✅ Activity timeline with sample events
+- ✅ All UI interactions and navigation
+- ✅ Settings page
+
+**Note:** This is perfect for demos and UI testing. To connect to real data from the Raspberry Pi, follow Option B below.
+
+---
+
+### 🔧 Option B: Full Setup with Backend
+
+**Want real data and API integration?**
+
+#### Step 1: Install Dependencies
 
 ```bash
 pip install fastapi uvicorn pydantic
 ```
 
-### Step 2: Initialize Database
+#### Step 2: Get Database Files
 
+The database schema is maintained on the `database` branch. You need to either:
+
+**Option A: Merge database branch**
+```bash
+git merge database
+```
+
+**Option B: Copy files from database branch**
+```bash
+git checkout database -- init_db.py ghost.db
+```
+
+Then initialize the database:
 ```bash
 python init_db.py
 ```
@@ -103,8 +139,12 @@ Then update web app Settings to `http://localhost:8000`
 
 ### Database Not Found
 
-Make sure you ran `init_db.py` first:
+Make sure you have the database files from the `database` branch:
 ```bash
+# Get database files
+git checkout database -- init_db.py
+
+# Initialize database
 python init_db.py
 ```
 
