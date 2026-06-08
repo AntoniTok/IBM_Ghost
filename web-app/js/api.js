@@ -4,7 +4,10 @@
 
 class SentinelAPI {
     constructor() {
-        this.baseURL = localStorage.getItem('apiEndpoint') || 'http://localhost:5000';
+        // Default to same-origin so the web app works on whatever port the
+        // server runs on (avoids the macOS port-5000 / AirPlay collision).
+        // Setting an absolute URL via Settings (e.g. the Pi's IP) overrides this.
+        this.baseURL = localStorage.getItem('apiEndpoint') || '';
         this.isConnected = false;
     }
 
@@ -70,6 +73,31 @@ class SentinelAPI {
         } catch (error) {
             this.isConnected = false;
             console.error('API POST Error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Make a DELETE request to the API
+     */
+    async delete(endpoint) {
+        try {
+            const response = await fetch(`${this.baseURL}${endpoint}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            this.isConnected = true;
+            return await response.json();
+        } catch (error) {
+            this.isConnected = false;
+            console.error('API DELETE Error:', error);
             throw error;
         }
     }
