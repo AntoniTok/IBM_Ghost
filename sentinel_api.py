@@ -183,37 +183,84 @@ def get_activities_by_date(activity_date: str):
 
 @app.post("/api/activities/log")
 def log_activity(activity: dict):
-    """Log a manual activity"""
+    """Log a manual activity (creates custom activity if needed)"""
     conn = get_db()
     
-    # Get activity ID
-    cursor = conn.execute("SELECT id FROM activities WHERE name = ?", (activity['activity'],))
-    row = cursor.fetchone()
-    
-    if not row:
+    try:
+        # Check if activity exists
+        cursor = conn.execute("SELECT id FROM activities WHERE name = ?", (activity['activity'],))
+        row = cursor.fetchone()
+        
+        if not row:
+            # Create custom activity if it doesn't exist
+            category = activity.get('category', 'other')
+            conn.execute("""
+                INSERT INTO activities (name, category)
+                VALUES (?, ?)
+            """, (activity['activity'], category))
+            activity_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            print(f"Created new custom activity: {activity['activity']} ({category})")
+        else:
+            activity_id = row['id']
+        
+        # Create prompt
+        conn.execute("""
+            INSERT INTO prompts (activity_id, day_type, prompted_at, expected_time)
+            VALUES (?, 'weekday', datetime('now'), '00:00')
+        """, (activity_id,))
+        
+        prompt_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        
+        # Create response
+        conn.execute("""
+            INSERT INTO responses (prompt_id, responded_at, confirmed, actual_time)
+            VALUES (?, datetime('now'), 1, ?)
+        """, (prompt_id, activity.get('time', datetime.now().strftime("%H:%M"))))
+        
+        conn.commit()
+        
+        return {
+            "status": "success",
+            "message": "Activity logged",
+            "activity_id": activity_id,
+            "is_new": row is None
+        }
+        
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to log activity: {str(e)}")
+    finally:
         conn.close()
-        raise HTTPException(status_code=404, detail="Activity not found")
+@app.delete("/api/activities/{response_id}")
+def delete_activity(response_id: int):
+    """Delete an activity response"""
+    conn = get_db()
     
-    activity_id = row['id']
-    
-    # Create prompt
-    conn.execute("""
-        INSERT INTO prompts (activity_id, day_type, prompted_at, expected_time)
-        VALUES (?, 'weekday', datetime('now'), '00:00')
-    """, (activity_id,))
-    
-    prompt_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    
-    # Create response
-    conn.execute("""
-        INSERT INTO responses (prompt_id, responded_at, confirmed, actual_time)
-        VALUES (?, datetime('now'), 1, ?)
-    """, (prompt_id, activity.get('time', datetime.now().strftime("%H:%M"))))
-    
-    conn.commit()
-    conn.close()
-    
-    return {"status": "success", "message": "Activity logged"}
+    try:
+        # Check if response exists
+        cursor = conn.execute("SELECT id FROM responses WHERE id = ?", (response_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            raise HTTPException(status_code=404, detail="Activity not found")
+        
+        # Delete the response
+        conn.execute("DELETE FROM responses WHERE id = ?", (response_id,))
+        conn.commit()
+        
+        return {
+            "status": "success",
+            "message": "Activity deleted successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete activity: {str(e)}")
+    finally:
+        conn.close()
+
 
 # ===== Alert Endpoints =====
 
@@ -373,9 +420,9 @@ def trigger_emergency(request: EmergencyRequest):
 # ===== Run Server =====
 
 if __name__ == "__main__":
-    print("🚀 Starting The Sentinel API...")
-    print("📱 Web App: http://localhost:5000/app/index.html")
-    print("📚 API Docs: http://localhost:5000/docs")
+    print("Starting The Sentinel API...")
+    print("Web App: http://localhost:5000/app/index.html")
+    print("API Docs: http://localhost:5000/docs")
     
     uvicorn.run(app, host="0.0.0.0", port=5000)
 

@@ -175,6 +175,13 @@
                 <div class="card">
                     <div class="card-header">
                         <h3>Today's Activities</h3>
+                        <button class="btn btn-primary btn-sm" onclick="showAddActivityModal()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px;">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                            Log Activity
+                        </button>
                     </div>
                     <div class="card-body">
                         <div id="todayActivities" class="activity-list">
@@ -302,6 +309,71 @@
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
                 <button class="btn btn-danger" onclick="acknowledgeAlert()">Acknowledge</button>
                 <button class="btn btn-primary" onclick="contactEmergency()">Contact Emergency</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Activity Modal -->
+    <div class="modal" id="addActivityModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Log Activity</h3>
+                <button class="modal-close" onclick="closeAddActivityModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="addActivityForm" onsubmit="submitActivity(event)">
+                    <div class="form-group">
+                        <label for="activitySelect">Activity</label>
+                        <select id="activitySelect" class="input" required onchange="toggleCustomActivity()">
+                            <option value="">Select an activity...</option>
+                            <option value="wake up">Wake Up</option>
+                            <option value="breakfast">Breakfast</option>
+                            <option value="medication">Medication</option>
+                            <option value="walk">Walk</option>
+                            <option value="lunch">Lunch</option>
+                            <option value="dinner">Dinner</option>
+                            <option value="bedtime">Bedtime</option>
+                            <option value="chess">Chess</option>
+                            <option value="read">Read</option>
+                            <option value="call">Call</option>
+                            <option value="custom">+ Add Custom Activity</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="customActivityGroup" style="display: none;">
+                        <label for="customActivityName">Custom Activity Name</label>
+                        <input type="text" id="customActivityName" class="input" placeholder="e.g., Gardening, Painting, etc.">
+                        <small>Enter a name for your custom activity</small>
+                    </div>
+                    <div class="form-group" id="customCategoryGroup" style="display: none;">
+                        <label for="customCategory">Category</label>
+                        <select id="customCategory" class="input">
+                            <option value="other">Other</option>
+                            <option value="meal">Meal</option>
+                            <option value="exercise">Exercise</option>
+                            <option value="health">Health</option>
+                            <option value="rest">Rest</option>
+                            <option value="social">Social</option>
+                            <option value="cognitive">Cognitive</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="activityTime">Time</label>
+                        <input type="time" id="activityTime" class="input" required>
+                        <small>When did this activity occur?</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="activityDate">Date</label>
+                        <input type="date" id="activityDate" class="input" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="activityNotes">Notes (optional)</label>
+                        <textarea id="activityNotes" class="input" rows="3" placeholder="Any additional details..."></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeAddActivityModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="submitActivity(event)">Log Activity</button>
             </div>
         </div>
     </div>

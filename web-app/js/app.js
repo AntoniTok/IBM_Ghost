@@ -264,7 +264,7 @@ function createActivityHTML(activity) {
                       activity.status === 'missed' ? 'Missed' : 'Pending';
 
     return `
-        <div class="activity-item">
+        <div class="activity-item" data-activity-id="${activity.id || ''}">
             <div class="activity-icon">${iconHTML}</div>
             <div class="activity-details">
                 <div class="activity-name">${activity.name.charAt(0).toUpperCase() + activity.name.slice(1)}</div>
@@ -274,8 +274,39 @@ function createActivityHTML(activity) {
                 </div>
             </div>
             <span class="activity-status ${statusClass}">${statusText}</span>
+            ${activity.id ? `
+                <button class="btn-icon btn-delete" onclick="deleteActivity(${activity.id}, '${activity.name}')" title="Delete activity">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        <line x1="10" y1="11" x2="10" y2="17"></line>
+                        <line x1="14" y1="11" x2="14" y2="17"></line>
+                    </svg>
+                </button>
+            ` : ''}
         </div>
     `;
+}
+
+/**
+ * Delete an activity
+ */
+async function deleteActivity(activityId, activityName) {
+    if (!confirm(`Are you sure you want to delete "${activityName}"? This cannot be undone.`)) {
+        return;
+    }
+    
+    try {
+        await api.delete(`/api/activities/${activityId}`);
+        showSuccess(`Activity "${activityName}" deleted successfully`);
+        
+        // Refresh the dashboard
+        await loadDashboard();
+        
+    } catch (error) {
+        console.error('Error deleting activity:', error);
+        showError('Failed to delete activity. Please try again.');
+    }
 }
 
 /**
@@ -564,6 +595,125 @@ function showError(message) {
 }
 
 /**
+ * Show add activity modal
+ */
+function showAddActivityModal() {
+    const modal = document.getElementById('addActivityModal');
+    const form = document.getElementById('addActivityForm');
+    
+    // Set default values
+    const now = new Date();
+    document.getElementById('activityTime').value = now.toTimeString().slice(0, 5);
+    document.getElementById('activityDate').value = now.toISOString().slice(0, 10);
+    document.getElementById('activityNotes').value = '';
+    
+    // Reset form
+    form.reset();
+    document.getElementById('activityTime').value = now.toTimeString().slice(0, 5);
+    document.getElementById('activityDate').value = now.toISOString().slice(0, 10);
+    
+    // Hide custom activity fields
+    document.getElementById('customActivityGroup').style.display = 'none';
+    document.getElementById('customCategoryGroup').style.display = 'none';
+    
+    modal.classList.add('active');
+}
+
+/**
+ * Toggle custom activity fields
+ */
+function toggleCustomActivity() {
+    const select = document.getElementById('activitySelect');
+    const customGroup = document.getElementById('customActivityGroup');
+    const categoryGroup = document.getElementById('customCategoryGroup');
+    const customNameInput = document.getElementById('customActivityName');
+    
+    if (select.value === 'custom') {
+        customGroup.style.display = 'block';
+        categoryGroup.style.display = 'block';
+        customNameInput.required = true;
+    } else {
+        customGroup.style.display = 'none';
+        categoryGroup.style.display = 'none';
+        customNameInput.required = false;
+    }
+}
+
+/**
+ * Close add activity modal
+ */
+function closeAddActivityModal() {
+    const modal = document.getElementById('addActivityModal');
+    modal.classList.remove('active');
+}
+
+/**
+ * Submit activity form
+ */
+async function submitActivity(event) {
+    event.preventDefault();
+    
+    const activitySelect = document.getElementById('activitySelect').value;
+    const time = document.getElementById('activityTime').value;
+    const date = document.getElementById('activityDate').value;
+    const notes = document.getElementById('activityNotes').value;
+    
+    let activityName = activitySelect;
+    let category = 'other';
+    
+    // Handle custom activity
+    if (activitySelect === 'custom') {
+        const customName = document.getElementById('customActivityName').value.trim();
+        const customCat = document.getElementById('customCategory').value;
+        
+        if (!customName) {
+            showError('Please enter a name for the custom activity');
+            return;
+        }
+        
+        activityName = customName.toLowerCase();
+        category = customCat;
+    }
+    
+    if (!activityName || !time || !date) {
+        showError('Please fill in all required fields');
+        return;
+    }
+    
+    try {
+        // Combine date and time
+        const datetime = `${date}T${time}`;
+        
+        const payload = {
+            activity: activityName,
+            time: time,
+            date: date,
+            notes: notes,
+            datetime: datetime
+        };
+        
+        // Add category if custom activity
+        if (activitySelect === 'custom') {
+            payload.category = category;
+            payload.is_custom = true;
+        }
+        
+        const response = await api.post('/api/activities/log', payload);
+        
+        const displayName = activityName.charAt(0).toUpperCase() + activityName.slice(1);
+        showSuccess(`Activity "${displayName}" logged successfully!`);
+        closeAddActivityModal();
+        
+        // Refresh the activities list
+        await loadDashboard();
+        
+    } catch (error) {
+        console.error('Error logging activity:', error);
+        showError('Failed to log activity. Please try again.');
+    }
+}
+
+/**
  * Set up event listeners
  */
 function setupEventListeners() {
@@ -604,11 +754,19 @@ function setupEventListeners() {
             closeModal();
         }
     });
+    
+    // Close add activity modal on background click
+    document.getElementById('addActivityModal').addEventListener('click', (e) => {
+        if (e.target.id === 'addActivityModal') {
+            closeAddActivityModal();
+        }
+    });
 
-    // Handle ESC key to close modal and sidebar
+    // Handle ESC key to close modals and sidebar
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             closeModal();
+            closeAddActivityModal();
             sidebar.classList.remove('active');
             sidebarOverlay.classList.remove('active');
         }
