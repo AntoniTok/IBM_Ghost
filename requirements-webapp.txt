@@ -1,16 +1,18 @@
-# The Sentinel - Web App Backend Requirements
-# Install with: pip install -r requirements-webapp.txt
+# The Sentinel — runtime dependencies for the full system (API + scheduler).
+#
+# Install with:
+#     pip install -r requirements-webapp.txt
+#
+# Pins are kept loose so wheels are available on current Python (3.13).
+# Re-pin with `pip freeze` once you decide to lock for deployment.
 
-# Core Framework
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
+# --- API (sentinel_api.py) -------------------------------------------------
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.6
 
-# Data Validation
-pydantic==2.5.0
+# --- Scheduler (scheduler.py) ----------------------------------------------
+croniter>=2.0
 
-# Database (SQLite is built-in to Python)
-# No additional packages needed for SQLite
-
-# Optional: For production deployment
-# gunicorn==21.2.0
-# python-multipart==0.0.6
+# --- Music feature (onboard.py, spotify_handler.py — feature-music branch) -
+requests>=2.31

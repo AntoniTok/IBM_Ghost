@@ -326,15 +326,46 @@ function getMockData(type) {
 }
 
 /**
- * Wrapper function to use mock data as fallback
+ * Wrapper function to use mock data as fallback.
+ * Toggles a global "demo data" banner so it's obvious in the UI when
+ * we're not actually talking to the backend.
  */
 async function fetchWithFallback(apiCall, mockType) {
     try {
-        return await apiCall();
+        const result = await apiCall();
+        toggleMockBanner(false);
+        return result;
     } catch (error) {
         console.warn('API call failed, using mock data:', error.message);
+        toggleMockBanner(true);
         return getMockData(mockType);
     }
+}
+
+function toggleMockBanner(show) {
+    let banner = document.getElementById('mock-data-banner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'mock-data-banner';
+        banner.setAttribute('role', 'status');
+        banner.style.cssText = [
+            'position: fixed',
+            'top: 0',
+            'left: 0',
+            'right: 0',
+            'z-index: 9999',
+            'padding: 6px 12px',
+            'background: #f59e0b',
+            'color: #1f2937',
+            'font: 600 13px/1.4 system-ui, sans-serif',
+            'text-align: center',
+            'box-shadow: 0 2px 6px rgba(0,0,0,.15)',
+        ].join(';');
+        banner.textContent =
+            'Demo data — backend unreachable. Check Settings or start the API.';
+        document.body.appendChild(banner);
+    }
+    banner.style.display = show ? 'block' : 'none';
 }
 
 // Made with Bob

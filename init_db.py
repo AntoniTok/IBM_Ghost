@@ -145,6 +145,24 @@ CREATE TABLE IF NOT EXISTS activity_responses (
     deferred_until  TEXT,
     raw_reply       TEXT
 );
+
+
+-- =====================================================================
+-- 7. ALERT DISMISSALS  (carer-side ack / false-alarm bookkeeping)
+-- =====================================================================
+-- /api/alerts derives alerts live from data; this table records which
+-- alerts the carer has dismissed so they stop reappearing.
+--   source='activity', source_id=activities.id   → dismissed for one day
+--   source='event',    source_id=events.id       → dismissed forever
+CREATE TABLE IF NOT EXISTS alert_dismissals (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    source       TEXT    NOT NULL CHECK(source IN ('activity','event')),
+    source_id    INTEGER NOT NULL,
+    status       TEXT    NOT NULL CHECK(status IN ('acknowledged','false_alarm')),
+    dismissed_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_alert_dismissals_lookup
+    ON alert_dismissals(source, source_id, dismissed_at);
 """
 
 PRESET_ACTIVITIES = [

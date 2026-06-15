@@ -115,6 +115,7 @@ def tick(db, now):
     check_wellbeing(db, now)
     update_routine_baseline(db, now)
     cleanup_expired(db, now)
+    mark_unresponded_expired(db, now)
     log_queue_depth(db)
 
 
@@ -611,6 +612,29 @@ def cleanup_expired(db, now):
     """, (iso(now),))
     if result.rowcount:
         log.info("expired %d undelivered utterances", result.rowcount)
+
+
+def mark_unresponded_expired(db, _now):
+    """Persist 'no_response' rows for activity prompts whose utterance expired.
+
+    Without this, "missed" is only ever inferred at API read-time. With it,
+    the day-summary queries have a definitive answer that survives a clock
+    rollover — tomorrow's dashboard knows yesterday's lunch went unanswered.
+    activity_responses.prompt_id is UNIQUE, so this is idempotent.
+    """
+    result = db.execute("""
+        INSERT INTO activity_responses (prompt_id, status)
+        SELECT ap.id, 'no_response'
+          FROM activity_prompts ap
+          JOIN utterance_queue uq ON uq.id = ap.utterance_id
+         WHERE uq.delivered_at = 'expired'
+           AND NOT EXISTS (
+               SELECT 1 FROM activity_responses ar WHERE ar.prompt_id = ap.id
+           )
+    """)
+    if result.rowcount:
+        log.info("recorded %d no_response rows for expired prompts",
+                 result.rowcount)
 
 
 def log_queue_depth(db):

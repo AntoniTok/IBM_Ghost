@@ -130,54 +130,52 @@ def get_activity_status(expected_time: Optional[str], actual_time: Optional[str]
 
 
 def _activities_for_date(conn, target: date) -> List["Activity"]:
-    """List activities + their template + today's response for a given date."""
+    """List activities + their template + the best response for a given date.
+
+    "Best" = prefer confirmed > skipped > deferred > no_response, then earliest.
+    Date comparisons use SQLite's 'localtime' modifier so a confirmation at
+    23:30 local time is counted on today, not tomorrow's UTC date.
+    """
     day_of_week = target.weekday()  # Monday=0, matches scheduler
     date_str = target.isoformat()
 
     cursor = conn.execute("""
-        SELECT a.id           AS activity_id,
+        WITH ranked AS (
+            SELECT ap.activity_id,
+                   ar.id           AS response_id,
+                   ar.responded_at,
+                   ar.status,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY ap.activity_id
+                       ORDER BY CASE ar.status
+                                  WHEN 'confirmed' THEN 0
+                                  WHEN 'skipped'   THEN 1
+                                  WHEN 'deferred'  THEN 2
+                                  ELSE 3
+                                END,
+                                ar.responded_at ASC
+                   ) AS rn
+              FROM activity_prompts ap
+              JOIN activity_responses ar ON ar.prompt_id = ap.id
+             WHERE date(ar.responded_at, 'localtime') = ?
+        )
+        SELECT a.id              AS activity_id,
                a.name,
                a.category,
                rt.expected_minute,
-               (
-                 SELECT ar.id
-                   FROM activity_prompts ap
-                   JOIN activity_responses ar ON ar.prompt_id = ap.id
-                  WHERE ap.activity_id = a.id
-                    AND date(ar.responded_at) = ?
-                  ORDER BY ar.responded_at ASC
-                  LIMIT 1
-               ) AS response_id,
-               (
-                 SELECT ar.responded_at
-                   FROM activity_prompts ap
-                   JOIN activity_responses ar ON ar.prompt_id = ap.id
-                  WHERE ap.activity_id = a.id
-                    AND date(ar.responded_at) = ?
-                  ORDER BY ar.responded_at ASC
-                  LIMIT 1
-               ) AS responded_at,
-               (
-                 SELECT ar.status
-                   FROM activity_prompts ap
-                   JOIN activity_responses ar ON ar.prompt_id = ap.id
-                  WHERE ap.activity_id = a.id
-                    AND date(ar.responded_at) = ?
-                  ORDER BY ar.responded_at ASC
-                  LIMIT 1
-               ) AS resp_status
+               chosen.response_id,
+               chosen.responded_at,
+               chosen.status      AS resp_status
           FROM activities a
           LEFT JOIN routine_template rt
                  ON rt.activity_id = a.id
                 AND rt.day_of_week = ?
                 AND rt.active = 1
-         WHERE rt.id IS NOT NULL OR EXISTS (
-             SELECT 1 FROM activity_prompts ap
-              JOIN activity_responses ar ON ar.prompt_id = ap.id
-              WHERE ap.activity_id = a.id AND date(ar.responded_at) = ?
-         )
+          LEFT JOIN ranked chosen
+                 ON chosen.activity_id = a.id AND chosen.rn = 1
+         WHERE rt.id IS NOT NULL OR chosen.activity_id IS NOT NULL
          ORDER BY rt.expected_minute IS NULL, rt.expected_minute, a.name
-    """, (date_str, date_str, date_str, day_of_week, date_str))
+    """, (date_str, day_of_week))
 
     activities: List[Activity] = []
     for row in cursor.fetchall():
@@ -293,6 +291,17 @@ def log_activity(activity: dict):
             VALUES (?, ?, 'confirmed', ?)
         """, (prompt_id, responded_at, raw_reply))
         response_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+        # Tell the scheduler's wellbeing check that someone is alive at the keyboard.
+        # Resets consecutive_misses so we don't page the carer five minutes after they
+        # just confirmed an activity through the web app.
+        conn.execute("""
+            UPDATE wellbeing_state
+               SET last_interaction_at = ?,
+                   consecutive_misses  = 0,
+                   updated_at          = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+             WHERE id = 1
+        """, (responded_at,))
         conn.commit()
 
         return {
@@ -347,18 +356,30 @@ def delete_activity(response_id: int):
 
 # ===== Alert Endpoints =====
 
+# Activity-derived alert ids fit in [1, 10_000); event-derived ids are
+# 10_000 + events.id. Both surfaces share /api/alerts/{id}/{acknowledge|false-alarm},
+# so the offset is how we route a dismissal back to the right source.
+_EVENT_ALERT_OFFSET = 10_000
+
+
+def _split_alert_id(alert_id: int):
+    """Return (source, source_id) for the alert routing back to its origin row."""
+    if alert_id >= _EVENT_ALERT_OFFSET:
+        return "event", alert_id - _EVENT_ALERT_OFFSET
+    return "activity", alert_id
+
+
 def _derive_alerts(conn) -> List[Alert]:
     """Derive alerts from real data: overdue activities + carer-alert events.
 
-    There is no dedicated alerts table — the scheduler writes carer alerts
-    into the `events` log and overdue activities are inferred from
-    routine_template vs. today's activity_responses.
+    There is no dedicated alerts table — overdue activities are inferred from
+    routine_template vs. today's activity_responses, and carer alerts come
+    from the `events` log. The `alert_dismissals` table filters out anything
+    the carer has acknowledged or marked as a false alarm.
     """
     alerts: List[Alert] = []
-    today = date.today()
-    day_of_week = today.weekday()
+    day_of_week = date.today().weekday()
     now_minute = datetime.now().hour * 60 + datetime.now().minute
-    date_str = today.isoformat()
 
     # 1) Overdue routine activities (no confirmed response, past expected time).
     rows = conn.execute("""
@@ -371,8 +392,14 @@ def _derive_alerts(conn) -> List[Alert]:
                    FROM activity_prompts ap
                    JOIN activity_responses ar ON ar.prompt_id = ap.id
                   WHERE ap.activity_id = a.id
-                    AND date(ar.responded_at) = ?
-                  ORDER BY ar.responded_at ASC
+                    AND date(ar.responded_at, 'localtime') = date('now','localtime')
+                  ORDER BY CASE ar.status
+                             WHEN 'confirmed' THEN 0
+                             WHEN 'skipped'   THEN 1
+                             WHEN 'deferred'  THEN 2
+                             ELSE 3
+                           END,
+                           ar.responded_at ASC
                   LIMIT 1
                ) AS resp_status
           FROM activities a
@@ -380,10 +407,16 @@ def _derive_alerts(conn) -> List[Alert]:
                 ON rt.activity_id = a.id
                AND rt.day_of_week = ?
                AND rt.active = 1
-    """, (date_str, day_of_week)).fetchall()
+         WHERE NOT EXISTS (
+             SELECT 1 FROM alert_dismissals ad
+              WHERE ad.source    = 'activity'
+                AND ad.source_id = a.id
+                AND date(ad.dismissed_at,'localtime') = date('now','localtime')
+         )
+    """, (day_of_week,)).fetchall()
 
     for row in rows:
-        if row["resp_status"] == "confirmed":
+        if row["resp_status"] in ("confirmed", "skipped"):
             continue
         minutes_late = now_minute - row["expected_minute"]
         if minutes_late < row["tolerance_min"]:
@@ -409,12 +442,18 @@ def _derive_alerts(conn) -> List[Alert]:
             resolved=False,
         ))
 
-    # 2) Carer-alert events written by scheduler.send_carer_alert().
+    # 2) Carer-alert events written by scheduler.send_carer_alert(); dismissals
+    #    here are permanent.
     carer_rows = conn.execute("""
-        SELECT id, ts, payload FROM events
-         WHERE source = 'interaction'
-           AND payload LIKE '%"kind": "carer_alert"%'
-         ORDER BY ts DESC
+        SELECT e.id, e.ts, e.payload
+          FROM events e
+         WHERE e.source = 'interaction'
+           AND e.payload LIKE '%"kind": "carer_alert"%'
+           AND NOT EXISTS (
+               SELECT 1 FROM alert_dismissals ad
+                WHERE ad.source = 'event' AND ad.source_id = e.id
+           )
+         ORDER BY e.ts DESC
          LIMIT 10
     """).fetchall()
     for r in carer_rows:
@@ -423,7 +462,7 @@ def _derive_alerts(conn) -> List[Alert]:
         except (ValueError, TypeError):
             payload = {}
         alerts.append(Alert(
-            id=10_000 + r["id"],  # disambiguate from activity-derived ids
+            id=_EVENT_ALERT_OFFSET + r["id"],
             activity="wellbeing",
             expected_time="--:--",
             actual_time=None,
@@ -434,6 +473,28 @@ def _derive_alerts(conn) -> List[Alert]:
         ))
 
     return alerts
+
+
+def _dismiss_alert(alert_id: int, status: str) -> dict:
+    """Shared write path for acknowledge / false_alarm."""
+    if status not in ("acknowledged", "false_alarm"):
+        raise HTTPException(status_code=400, detail="invalid dismissal status")
+    source, source_id = _split_alert_id(alert_id)
+    conn = get_db()
+    try:
+        conn.execute("""
+            INSERT INTO alert_dismissals (source, source_id, status)
+            VALUES (?, ?, ?)
+        """, (source, source_id, status))
+        conn.commit()
+        return {
+            "status": "success",
+            "message": f"Alert {alert_id} {status.replace('_', ' ')}",
+            "source": source,
+            "source_id": source_id,
+        }
+    finally:
+        conn.close()
 
 
 @app.get("/api/alerts", response_model=List[Alert])
@@ -453,15 +514,14 @@ def get_active_alerts():
 
 @app.post("/api/alerts/{alert_id}/acknowledge")
 def acknowledge_alert(alert_id: int):
-    """Acknowledge an alert"""
-    # In production, update database
-    return {"status": "success", "message": f"Alert {alert_id} acknowledged"}
+    """Persist an acknowledgement so the alert stops surfacing."""
+    return _dismiss_alert(alert_id, "acknowledged")
+
 
 @app.post("/api/alerts/{alert_id}/false-alarm")
 def mark_false_alarm(alert_id: int):
-    """Mark alert as false alarm"""
-    # In production, update database
-    return {"status": "success", "message": f"Alert {alert_id} marked as false alarm"}
+    """Persist a false-alarm dismissal."""
+    return _dismiss_alert(alert_id, "false_alarm")
 
 # ===== Statistics Endpoints =====
 
@@ -477,7 +537,7 @@ def get_dashboard_statistics():
             SELECT COUNT(*) AS n
               FROM activity_responses
              WHERE status = 'confirmed'
-               AND date(responded_at) = ?
+               AND date(responded_at, 'localtime') = ?
         """, (date_str,)).fetchone()["n"]
 
         expected_today = conn.execute("""
@@ -492,7 +552,7 @@ def get_dashboard_statistics():
               JOIN activity_prompts ap ON ap.id = ar.prompt_id
               JOIN activities a       ON a.id  = ap.activity_id
              WHERE ar.status = 'confirmed'
-               AND date(ar.responded_at) = ?
+               AND date(ar.responded_at, 'localtime') = ?
              ORDER BY ar.responded_at DESC
              LIMIT 1
         """, (date_str,)).fetchone()

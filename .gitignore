@@ -7,3 +7,20 @@ venv/
 .venv/
 env/
 ENV/
+
+# Local SQLite database — regenerate with `python init_db.py` + `python seed.py`
+ghost.db
+ghost.db-journal
+ghost.db-wal
+ghost.db-shm
+
+# Spotify tokens / local secrets
+.granite_ghost/
+spotify_tokens.json
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
