@@ -69,10 +69,17 @@ class EmergencyRequest(BaseModel):
 # ===== Helper Functions =====
 
 def get_db():
-    """Get database connection"""
-    conn = sqlite3.connect(DB_PATH)
+    """Get a SQLite connection that plays well with concurrent writers.
+
+    Multiple processes hit ghost.db on the Pi: scheduler.py, queue_consumer.py,
+    and this API. WAL mode + busy_timeout prevent the readers from blocking
+    each other and gives short writes a 5 s grace period to commit.
+    """
+    conn = sqlite3.connect(DB_PATH, timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 
@@ -696,6 +703,167 @@ def update_routine_template(data: dict):
     return {"status": "success", "message": "Routine template updated",
             "days_affected": len(days)}
 
+# ===== Routine Schedule CRUD (powers the web-app Schedule page) =====
+#
+# These four endpoints sit alongside the older /api/routine/template ones
+# above. They expose row-level operations the Schedule UI in app.js needs
+# (add / edit / remove a single (activity, day_of_week) slot), whereas
+# /api/routine/template POST is the bulk "set this activity's time on every
+# day" shortcut the carer-dashboard's quick-edit uses.
+
+@app.get("/api/routine")
+def get_routine_schedule():
+    """All routine_template rows, joined to the activity for display."""
+    conn = get_db()
+    try:
+        rows = conn.execute("""
+            SELECT rt.id, rt.activity_id, rt.day_of_week, rt.expected_minute,
+                   rt.tolerance_min, rt.active, a.name, a.category
+              FROM routine_template rt
+              JOIN activities a ON a.id = rt.activity_id
+             ORDER BY rt.day_of_week, rt.expected_minute
+        """).fetchall()
+    finally:
+        conn.close()
+
+    return {
+        "schedule": [
+            {
+                "id": r["id"],
+                "activity_id": r["activity_id"],
+                "activity_name": r["name"],
+                "category": r["category"],
+                "day_of_week": r["day_of_week"],
+                "expected_time": minute_to_hhmm(r["expected_minute"]),
+                "expected_minute": r["expected_minute"],
+                "tolerance_min": r["tolerance_min"],
+                "active": bool(r["active"]),
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.put("/api/routine/{routine_id}")
+def update_routine_row(routine_id: int, data: dict):
+    """Patch a single routine row's time / tolerance / active flag."""
+    conn = get_db()
+    try:
+        if not conn.execute(
+            "SELECT 1 FROM routine_template WHERE id = ?", (routine_id,)
+        ).fetchone():
+            raise HTTPException(status_code=404, detail="Routine template not found")
+
+        expected_minute = data.get("expected_minute")
+        if "expected_time" in data and expected_minute is None:
+            expected_minute = hhmm_to_minute(data["expected_time"])
+
+        updates: List[str] = []
+        params: list = []
+
+        if expected_minute is not None:
+            if not 0 <= expected_minute <= 1439:
+                raise HTTPException(status_code=400, detail="expected_minute must be 0-1439")
+            updates.append("expected_minute = ?")
+            params.append(expected_minute)
+
+        if "tolerance_min" in data:
+            tolerance = int(data["tolerance_min"])
+            if not 5 <= tolerance <= 120:
+                raise HTTPException(status_code=400, detail="tolerance_min must be 5-120")
+            updates.append("tolerance_min = ?")
+            params.append(tolerance)
+
+        if "active" in data:
+            updates.append("active = ?")
+            params.append(1 if data["active"] else 0)
+
+        if not updates:
+            raise HTTPException(status_code=400, detail="no fields to update")
+
+        updates.append("updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')")
+        params.append(routine_id)
+        conn.execute(
+            f"UPDATE routine_template SET {', '.join(updates)} WHERE id = ?",
+            params,
+        )
+        conn.commit()
+        return {"status": "success", "message": "Routine updated"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@app.post("/api/routine")
+def create_routine_row(data: dict):
+    """Add a new (activity, day_of_week) slot. 409 if it already exists."""
+    activity_id = data.get("activity_id")
+    day_of_week = data.get("day_of_week")
+    if activity_id is None or day_of_week is None:
+        raise HTTPException(status_code=400, detail="activity_id and day_of_week required")
+    if not 0 <= day_of_week <= 6:
+        raise HTTPException(status_code=400, detail="day_of_week must be 0-6")
+
+    expected_minute = data.get("expected_minute")
+    if expected_minute is None and "expected_time" in data:
+        expected_minute = hhmm_to_minute(data["expected_time"])
+    if expected_minute is None or not 0 <= expected_minute <= 1439:
+        raise HTTPException(status_code=400, detail="valid expected_time required")
+
+    tolerance_min = int(data.get("tolerance_min", 30))
+    if not 5 <= tolerance_min <= 120:
+        raise HTTPException(status_code=400, detail="tolerance_min must be 5-120")
+
+    conn = get_db()
+    try:
+        if conn.execute("""
+            SELECT 1 FROM routine_template
+             WHERE activity_id = ? AND day_of_week = ?
+        """, (activity_id, day_of_week)).fetchone():
+            raise HTTPException(status_code=409,
+                                detail="Routine already exists for this (activity, day)")
+        conn.execute("""
+            INSERT INTO routine_template
+                (activity_id, day_of_week, expected_minute, tolerance_min, active)
+            VALUES (?, ?, ?, ?, 1)
+        """, (activity_id, day_of_week, expected_minute, tolerance_min))
+        routine_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.commit()
+        return {"status": "success", "message": "Routine created", "routine_id": routine_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@app.delete("/api/routine/{routine_id}")
+def delete_routine_row(routine_id: int):
+    """Remove a routine row."""
+    conn = get_db()
+    try:
+        if not conn.execute(
+            "SELECT 1 FROM routine_template WHERE id = ?", (routine_id,)
+        ).fetchone():
+            raise HTTPException(status_code=404, detail="Routine template not found")
+        conn.execute("DELETE FROM routine_template WHERE id = ?", (routine_id,))
+        conn.commit()
+        return {"status": "success", "message": "Routine deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
 # ===== Emergency Endpoints =====
 
 @app.post("/api/emergency/trigger")
@@ -725,6 +893,6 @@ if __name__ == "__main__":
     print(f"Web App: http://localhost:{port}/app/index.html")
     print(f"API Docs: http://localhost:{port}/docs")
 
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="::", port=port)
 
 # Made with Bob

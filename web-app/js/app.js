@@ -2,10 +2,14 @@
  * Main Application Logic
  */
 
+// API Base URL - uses same origin (empty string) to work with any port
+const API_BASE_URL = '';
+
 // Global state
 let currentPage = 'dashboard';
 let refreshInterval = null;
 let currentAlert = null;
+let alertsData = []; // Store alerts for modal access
 
 // Activity category colors and icons
 const activityCategories = {
@@ -26,6 +30,29 @@ function getActivityIcon(category) {
             <path d="${cat.icon}"/>
         </svg>
     `;
+}
+
+// Simple notification function for UI feedback
+function showNotification(message, type = 'info') {
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.className = 'notification notification-' + type;
+    notification.textContent = message;
+    
+    // Set background color based on type
+    let bgColor = '#3b82f6'; // default blue
+    if (type === 'success') bgColor = '#10b981';
+    if (type === 'error') bgColor = '#ef4444';
+    
+    notification.style.cssText = 'position: fixed; top: 80px; right: 20px; padding: 1rem 1.5rem; background: ' + bgColor + '; color: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); z-index: 10000; animation: slideIn 0.3s ease-out;';
+    
+    document.body.appendChild(notification);
+    
+    // Auto-remove after 3 seconds
+    setTimeout(() => {
+        notification.style.animation = 'slideOut 0.3s ease-out';
+        setTimeout(() => notification.remove(), 300);
+    }, 3000);
 }
 
 /**
@@ -109,6 +136,9 @@ async function loadPageData(pageName) {
             break;
         case 'timeline':
             await loadTimeline();
+            break;
+        case 'schedule':
+            await loadSchedulePage();
             break;
         case 'settings':
             loadSettings();
@@ -244,7 +274,7 @@ function createAlertHTML(alert) {
     const timeAgo = getTimeAgo(alert.timestamp);
 
     return `
-        <div class="alert-item ${severityClass} ${resolvedClass}" onclick="showAlertModal(${JSON.stringify(alert).replace(/"/g, '"')})">
+        <div class="alert-item ${severityClass} ${resolvedClass}" data-alert-id="${alert.id}">
             <div class="alert-header">
                 <span class="alert-title">${alert.activity.charAt(0).toUpperCase() + alert.activity.slice(1)}</span>
                 <span class="alert-time">${timeAgo}</span>
@@ -328,11 +358,24 @@ async function loadAlerts() {
                     <p>No alerts found</p>
                 </div>
             `;
+            alertsData = [];
             return;
         }
 
+        alertsData = alerts; // Store for modal access
         container.innerHTML = alerts.map(alert => createAlertHTML(alert)).join('');
         updateAlertBadge(alerts.filter(a => !a.resolved).length);
+        
+        // Add click handlers to alert items
+        container.querySelectorAll('.alert-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const alertId = parseInt(item.dataset.alertId);
+                const alert = alertsData.find(a => a.id === alertId);
+                if (alert) {
+                    showAlertModal(alert);
+                }
+            });
+        });
 
     } catch (error) {
         console.error('Error loading alerts:', error);
@@ -380,18 +423,30 @@ async function loadTimeline() {
 /**
  * Create HTML for timeline item
  */
+const activityIcons = {
+    'wake up': '🛏️', 'breakfast': '🥣', 'medication': '💊', 'walk': '🚶',
+    'lunch': '🍽️', 'dinner': '🍲', 'bedtime': '🌙', 'chess': '♟️',
+    'read': '📖', 'call': '📞',
+    // fallback by category
+    'meal': '🍽️', 'health': '⭐', 'exercise': '🏃', 'rest': '😴',
+    'social': '👥', 'cognitive': '🧠', 'other': '📋'
+};
+
 function createTimelineItemHTML(activity) {
     const icon = activityIcons[activity.name] || activityIcons[activity.category] || activityIcons['other'];
     const time = activity.time || activity.expected_time || '--';
+    const statusClass = activity.status || 'pending';
 
     return `
         <div class="timeline-item">
             <div class="timeline-content">
                 <div class="timeline-time">${time}</div>
-                <div class="timeline-title">${icon} ${activity.name}</div>
+                <div class="timeline-title">${icon} ${activity.name.charAt(0).toUpperCase() + activity.name.slice(1)}</div>
                 <div class="timeline-description">
-                    ${activity.status === 'completed' ? 'Completed successfully' : 
+                    <span class="activity-status ${statusClass}">
+                    ${activity.status === 'completed' ? 'Completed' : 
                       activity.status === 'missed' ? 'Missed' : 'Pending'}
+                    </span>
                 </div>
             </div>
         </div>
@@ -781,3 +836,274 @@ if (document.readyState === 'loading') {
 }
 
 // Made with Bob
+
+
+// Schedule page state
+let currentScheduleDay = 0; // Monday
+let scheduleData = [];
+let allActivities = [];
+
+
+// ============================================================================
+// Schedule Management Functions
+// ============================================================================
+
+async function loadSchedulePage() {
+    console.log('Loading schedule page...');
+    
+    try {
+        // Set up day selector
+        setupDaySelector();
+        
+        // Load activities for dropdown
+        await loadActivitiesForSchedule();
+        
+        // Load schedule
+        await loadSchedule();
+        
+        // Set up event listeners
+        document.getElementById('addScheduleBtn')?.addEventListener('click', showAddScheduleModal);
+        document.getElementById('scheduleForm')?.addEventListener('submit', handleScheduleSubmit);
+        
+        console.log('Schedule page loaded successfully');
+    } catch (error) {
+        console.error('Error loading schedule page:', error);
+    }
+}
+
+function setupDaySelector() {
+    const dayButtons = document.querySelectorAll('.day-btn');
+    dayButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            // Update active state
+            dayButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            // Update current day and reload
+            currentScheduleDay = parseInt(btn.dataset.day);
+            loadSchedule();
+        });
+    });
+}
+
+async function loadActivitiesForSchedule() {
+    try {
+        // Get activities from routine schedule
+        const response = await fetch(`${API_BASE_URL}/api/routine`);
+        const data = await response.json();
+        
+        // Extract unique activities from schedule
+        const activityMap = new Map();
+        data.schedule.forEach(item => {
+            if (!activityMap.has(item.activity_id)) {
+                activityMap.set(item.activity_id, {
+                    id: item.activity_id,
+                    name: item.activity_name,
+                    category: item.category
+                });
+            }
+        });
+        
+        allActivities = Array.from(activityMap.values());
+        
+        // Sort by name
+        allActivities.sort((a, b) => a.name.localeCompare(b.name));
+        
+        // Populate dropdown
+        const select = document.getElementById('scheduleActivity');
+        if (select) {
+            select.innerHTML = '<option value="">Select activity...</option>';
+            allActivities.forEach(activity => {
+                const option = document.createElement('option');
+                option.value = activity.id;
+                option.textContent = activity.name;
+                option.dataset.category = activity.category;
+                select.appendChild(option);
+            });
+        }
+    } catch (error) {
+        console.error('Failed to load activities:', error);
+    }
+}
+
+async function loadSchedule() {
+    const listEl = document.getElementById('scheduleList');
+    if (!listEl) return;
+    
+    listEl.innerHTML = '<div class="loading">Loading schedule...</div>';
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/routine`);
+        const data = await response.json();
+        
+        scheduleData = data.schedule || [];
+        
+        // Filter by current day
+        const daySchedule = scheduleData.filter(s => s.day_of_week === currentScheduleDay);
+        
+        if (daySchedule.length === 0) {
+            listEl.innerHTML = '<div class="empty-state">No activities scheduled for this day</div>';
+            return;
+        }
+        
+        // Sort by time
+        daySchedule.sort((a, b) => a.expected_minute - b.expected_minute);
+        
+        listEl.innerHTML = daySchedule.map(item => createScheduleItemHTML(item)).join('');
+        
+    } catch (error) {
+        console.error('Failed to load schedule:', error);
+        listEl.innerHTML = '<div class="error">Failed to load schedule</div>';
+    }
+}
+
+function createScheduleItemHTML(item) {
+    const activeClass = item.active ? '' : 'inactive';
+    return `
+        <div class="schedule-item ${activeClass}" data-routine-id="${item.id}">
+            <div class="schedule-info">
+                <div class="schedule-time">${item.expected_time}</div>
+                <div class="schedule-details">
+                    <div class="schedule-activity-name">${item.activity_name}</div>
+                    <div class="schedule-tolerance">±${item.tolerance_min} minutes</div>
+                </div>
+            </div>
+            <div class="schedule-actions">
+                <button class="btn-icon" onclick="editScheduleItem(${item.id})" title="Edit">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/>
+                    </svg>
+                </button>
+                <button class="btn-icon btn-delete" onclick="deleteScheduleItem(${item.id})" title="Delete">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 2l2-2h4l2 2h4v2H2V2h4zM3 6h14l-1 14H4L3 6z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function showAddScheduleModal() {
+    const modal = document.getElementById('scheduleModal');
+    const form = document.getElementById('scheduleForm');
+    const title = document.getElementById('scheduleModalTitle');
+    
+    if (!modal || !form) return;
+    
+    // Reset form
+    form.reset();
+    document.getElementById('scheduleRoutineId').value = '';
+    document.getElementById('scheduleActive').checked = true;
+    title.textContent = 'Add Activity to Schedule';
+    
+    modal.classList.add('active');
+}
+
+function closeScheduleModal() {
+    const modal = document.getElementById('scheduleModal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+}
+
+async function editScheduleItem(routineId) {
+    const item = scheduleData.find(s => s.id === routineId);
+    if (!item) return;
+    
+    const modal = document.getElementById('scheduleModal');
+    const form = document.getElementById('scheduleForm');
+    const title = document.getElementById('scheduleModalTitle');
+    
+    if (!modal || !form) return;
+    
+    // Populate form
+    document.getElementById('scheduleRoutineId').value = item.id;
+    document.getElementById('scheduleActivity').value = item.activity_id;
+    document.getElementById('scheduleTime').value = item.expected_time;
+    document.getElementById('scheduleTolerance').value = item.tolerance_min;
+    document.getElementById('scheduleActive').checked = item.active;
+    
+    title.textContent = 'Edit Activity Schedule';
+    modal.classList.add('active');
+}
+
+async function handleScheduleSubmit(e) {
+    e.preventDefault();
+    
+    const routineId = document.getElementById('scheduleRoutineId').value;
+    const activityId = parseInt(document.getElementById('scheduleActivity').value);
+    const time = document.getElementById('scheduleTime').value;
+    const tolerance = parseInt(document.getElementById('scheduleTolerance').value);
+    const active = document.getElementById('scheduleActive').checked;
+    
+    if (!activityId || !time) {
+        showNotification('Please fill in all required fields', 'error');
+        return;
+    }
+    
+    try {
+        let response;
+        
+        if (routineId) {
+            // Update existing
+            response = await fetch(`${API_BASE_URL}/api/routine/${routineId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    expected_time: time,
+                    tolerance_min: tolerance,
+                    active: active
+                })
+            });
+        } else {
+            // Create new
+            response = await fetch(`${API_BASE_URL}/api/routine`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    activity_id: activityId,
+                    day_of_week: currentScheduleDay,
+                    expected_time: time,
+                    tolerance_min: tolerance
+                })
+            });
+        }
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to save schedule');
+        }
+        
+        showNotification(routineId ? 'Schedule updated' : 'Activity added to schedule', 'success');
+        closeScheduleModal();
+        await loadSchedule();
+        
+    } catch (error) {
+        console.error('Failed to save schedule:', error);
+        showNotification(error.message, 'error');
+    }
+}
+
+async function deleteScheduleItem(routineId) {
+    if (!confirm('Remove this activity from the schedule?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/routine/${routineId}`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to delete schedule');
+        }
+        
+        showNotification('Activity removed from schedule', 'success');
+        await loadSchedule();
+        
+    } catch (error) {
+        console.error('Failed to delete schedule:', error);
+        showNotification('Failed to remove activity', 'error');
+    }
+}

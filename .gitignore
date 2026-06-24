@@ -1,26 +1,36 @@
-# Python cache files
+# --- Python ---
 __pycache__/
 *.py[cod]
+*.egg-info/
 
-# Virtual environments
+# --- Virtualenvs ---
 venv/
 .venv/
 env/
 ENV/
 
-# Local SQLite database — regenerate with `python init_db.py` + `python seed.py`
+# --- Local DB (regenerate with `python init_db.py` + `python seed.py`) ---
 ghost.db
 ghost.db-journal
 ghost.db-wal
 ghost.db-shm
+ghost.pi.db*
 
-# Spotify tokens / local secrets
+# --- Runtime logs and cached data ---
+service_manager.log
+data/
+
+# --- Secrets ---
+.env
+service_account.json
 .granite_ghost/
 spotify_tokens.json
 
-# macOS
-.DS_Store
+# --- Large model artifacts (Piper + Vosk; install on the Pi out-of-band) ---
+*.onnx
+models/
 
-# IDE
+# --- macOS / IDE noise ---
+.DS_Store
 .vscode/
 .idea/
